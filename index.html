@@ -755,14 +755,24 @@
               </button>
             </div>
 <script type="module">
-  // Import the functions you need from the SDKs you need
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-analytics.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
+  // ======== Firebase import & 초기화 ========
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+  import {
+    getFirestore,
+    collection,
+    addDoc,
+    getDocs,
+    doc,
+    updateDoc,
+    deleteDoc,
+  } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+  import {
+    getStorage,
+    ref,
+    uploadBytes,
+    getDownloadURL,
+  } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
 
-  // Your web app's Firebase configuration
-  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
   const firebaseConfig = {
     apiKey: "AIzaSyCIB1-zIklod2dcTJUyYj4pqSfDBnU31oE",
     authDomain: "couple-diary-830cc.firebaseapp.com",
@@ -770,570 +780,560 @@
     storageBucket: "couple-diary-830cc.firebasestorage.app",
     messagingSenderId: "989294208046",
     appId: "1:989294208046:web:324f854737d55b5813abbf",
-    measurementId: "G-JQJZBB04RX"
+    measurementId: "G-JQJZBB04RX",
   };
 
-  // Initialize Firebase
   const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
-</script>
-          </div>
-        </form>
-      </section>
+  const db = getFirestore(app);
+  const storage = getStorage(app);
+  const postsCollection = collection(db, "posts");
 
-      <!-- 상세 보기 -->
-      <section id="detailView" class="view">
-        <div class="back-link" data-back="list">
-          <span>←</span><span>목록으로 돌아가기</span>
-        </div>
-        <div class="post-detail-header">
-          <div class="post-detail-title" id="detailTitle"></div>
-          <div class="post-detail-meta">
-            <span id="detailDate"></span>
-            <span id="detailImageCount"></span>
-          </div>
-        </div>
-        <div class="post-detail-content" id="detailContent"></div>
-        <div class="post-detail-images" id="detailImages"></div>
-        <div class="detail-toolbar">
-          <span id="detailCreatedInfo"></span>
-          <button class="secondary-btn" type="button" id="detailToEditorBtn">이 글과 비슷한 글 쓰기</button>
-        </div>
-      </section>
-    </main>
-  </div>
+  // ======== 간단 유틸 ========
+  function formatDate(date) {
+    const d = date instanceof Date ? date : new Date(date);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}.${m}.${day}`;
+  }
 
-  <!-- 사진 확대 모달 -->
-  <div id="imageModal" class="image-modal-overlay">
-    <div class="image-modal-content">
-      <button class="image-modal-close" id="imageModalClose">✕</button>
-      <img id="imageModalImg" src="" alt="확대 이미지" />
-    </div>
-  </div>
+  function getTodayLabel() {
+    const d = new Date();
+    const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+    return `${formatDate(d)} (${weekdays[d.getDay()]})`;
+  }
 
-  <script>
-    // ======== 간단 유틸 ========
-    function formatDate(date) {
-      const d = (date instanceof Date) ? date : new Date(date);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, "0");
-      const day = String(d.getDate()).padStart(2, "0");
-      return `${y}.${m}.${day}`;
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function dateToInputValue(d) {
+    const dt = d instanceof Date ? d : new Date(d);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const day = String(dt.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function todayInputValue() {
+    return dateToInputValue(new Date());
+  }
+
+  // ======== D-day 계산 ========
+  // ⭐ 여기에서 연도를 너네 기념일 연도로 바꾸면 됨!
+  const ANNIV_BASE = new Date(2023, 6, 9); // 2023-07-09 (월은 0부터 시작이라 6이 7월)
+
+  function calcDDay(baseDate) {
+    const today = new Date();
+    const t = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    );
+    const b = new Date(
+      baseDate.getFullYear(),
+      baseDate.getMonth(),
+      baseDate.getDate()
+    );
+    const diffDays = Math.floor((t - b) / (1000 * 60 * 60 * 24)) + 1; // 첫날 D+1
+    return diffDays;
+  }
+
+  function updateDDayBox() {
+    const ddayBox = document.getElementById("ddayBox");
+    if (!ddayBox) return;
+    const days = calcDDay(ANNIV_BASE);
+    const dateStr = `${ANNIV_BASE.getFullYear()}.${String(
+      ANNIV_BASE.getMonth() + 1
+    ).padStart(2, "0")}.${String(ANNIV_BASE.getDate()).padStart(2, "0")}`;
+    if (days >= 1) {
+      ddayBox.textContent = `💗 D+${days} (since ${dateStr})`;
+    } else {
+      ddayBox.textContent = `💗 D${days} (since ${dateStr})`;
     }
+  }
 
-    function getTodayLabel() {
-      const d = new Date();
-      const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
-      return `${formatDate(d)} (${weekdays[d.getDay()]})`;
-    }
+  // ======== 상태 관리 (Firestore 사용) ========
+  let posts = [];
+  let currentSearch = "";
+  let currentListMode = "grid"; // "grid" | "timeline"
+  let editingPostId = null;
 
-    function escapeHtml(str) {
-      return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-    }
+  function getFilteredPosts() {
+    if (!currentSearch.trim()) return posts;
+    const keyword = currentSearch.trim().toLowerCase();
+    return posts.filter((p) => {
+      return (
+        (p.title || "").toLowerCase().includes(keyword) ||
+        (p.content || "").toLowerCase().includes(keyword)
+      );
+    });
+  }
 
-    function dateToInputValue(d) {
-      const dt = (d instanceof Date) ? d : new Date(d);
-      const y = dt.getFullYear();
-      const m = String(dt.getMonth() + 1).padStart(2, "0");
-      const day = String(dt.getDate()).padStart(2, "0");
-      return `${y}-${m}-${day}`;
-    }
-
-    function todayInputValue() {
-      return dateToInputValue(new Date());
-    }
-
-    // ======== D-day 계산 ========
-    // ⭐ 여기에서 연도를 너네 기념일 연도로 바꾸면 됨!
-    const ANNIV_BASE = new Date(2023, 6, 9); // 2024-07-09 (월은 0부터 시작이라 6이 7월)
-
-    function calcDDay(baseDate) {
-      const today = new Date();
-      const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-      const b = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
-      const diffDays = Math.floor((t - b) / (1000 * 60 * 60 * 24)) + 1; // 첫날 D+1
-      return diffDays;
-    }
-
-    function updateDDayBox() {
-      const ddayBox = document.getElementById("ddayBox");
-      if (!ddayBox) return;
-      const days = calcDDay(ANNIV_BASE);
-      const dateStr = `${ANNIV_BASE.getFullYear()}.${String(ANNIV_BASE.getMonth() + 1).padStart(2,"0")}.${String(ANNIV_BASE.getDate()).padStart(2,"0")}`;
-      if (days >= 1) {
-        ddayBox.textContent = `💗 D+${days} (since ${dateStr})`;
-      } else {
-        ddayBox.textContent = `💗 D${days} (since ${dateStr})`;
-      }
-    }
-
-    // ======== 상태 관리 (localStorage) ========
-    const STORAGE_KEY = "couple_diary_posts_v1";
-    let posts = [];
-    let currentSearch = "";
-    let currentListMode = "grid"; // "grid" | "timeline"
-    let editingPostId = null;
-
-    function loadPosts() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
-        return parsed.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      } catch (e) {
-        console.error("loadPosts error:", e);
-        return [];
-      }
-    }
-
-    function savePosts() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(posts));
-    }
-
-    function getFilteredPosts() {
-      if (!currentSearch.trim()) return posts;
-      const keyword = currentSearch.trim().toLowerCase();
-      return posts.filter(p => {
-        return (
-          (p.title || "").toLowerCase().includes(keyword) ||
-          (p.content || "").toLowerCase().includes(keyword)
-        );
+  async function fetchPosts() {
+    const snap = await getDocs(postsCollection);
+    const list = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      list.push({
+        id: docSnap.id,
+        title: data.title || "",
+        content: data.content || "",
+        images: data.images || [],
+        createdAt: data.createdAt || Date.now(),
+        date: data.date || data.createdAt || Date.now(),
       });
-    }
-
-    // ======== DOM 참조 ========
-    const listView = document.getElementById("listView");
-    const editorView = document.getElementById("editorView");
-    const detailView = document.getElementById("detailView");
-
-    const postListEl = document.getElementById("postList");
-    const timelineListEl = document.getElementById("timelineList");
-    const emptyStateEl = document.getElementById("emptyState");
-    const postCountTag = document.getElementById("postCountTag");
-
-    const newPostBtn = document.getElementById("newPostBtn");
-    const postForm = document.getElementById("postForm");
-    const titleInput = document.getElementById("titleInput");
-    const dateInput = document.getElementById("dateInput");
-    const contentInput = document.getElementById("contentInput");
-    const imageInput = document.getElementById("imageInput");
-    const todayInfo = document.getElementById("todayInfo");
-    const cancelBtn = document.getElementById("cancelBtn");
-
-    const detailTitle = document.getElementById("detailTitle");
-    const detailDate = document.getElementById("detailDate");
-    const detailImageCount = document.getElementById("detailImageCount");
-    const detailContent = document.getElementById("detailContent");
-    const detailImages = document.getElementById("detailImages");
-    const detailCreatedInfo = document.getElementById("detailCreatedInfo");
-    const detailToEditorBtn = document.getElementById("detailToEditorBtn");
-
-    const backLinks = document.querySelectorAll(".back-link");
-
-    const searchInput = document.getElementById("searchInput");
-    const toggleButtons = document.querySelectorAll(".toggle-btn");
-
-    const imageModal = document.getElementById("imageModal");
-    const imageModalImg = document.getElementById("imageModalImg");
-    const imageModalClose = document.getElementById("imageModalClose");
-
-    // ======== 뷰 전환 ========
-    function showView(name) {
-      [listView, editorView, detailView].forEach(v => v.classList.remove("active"));
-      if (name === "list") listView.classList.add("active");
-      if (name === "editor") editorView.classList.add("active");
-      if (name === "detail") detailView.classList.add("active");
-    }
-
-    // ======== 이미지 모달 ========
-    function openImageModal(src) {
-      imageModalImg.src = src;
-      imageModal.classList.add("active");
-    }
-
-    function closeImageModal() {
-      imageModal.classList.remove("active");
-      imageModalImg.src = "";
-    }
-
-    imageModalClose.addEventListener("click", closeImageModal);
-    imageModal.addEventListener("click", (e) => {
-      if (e.target === imageModal) {
-        closeImageModal();
-      }
     });
+    list.sort((a, b) => (b.date || b.createdAt) - (a.date || a.createdAt));
+    posts = list;
+  }
 
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && imageModal.classList.contains("active")) {
-        closeImageModal();
-      }
-    });
+  // ======== DOM 참조 ========
+  const listView = document.getElementById("listView");
+  const editorView = document.getElementById("editorView");
+  const detailView = document.getElementById("detailView");
 
-    // ======== 게시판 렌더링 (카드 뷰) ========
-    function renderList() {
-      const filtered = getFilteredPosts();
-      postListEl.innerHTML = "";
-      const hasPosts = filtered.length > 0;
-      emptyStateEl.style.display = hasPosts ? "none" : "block";
+  const postListEl = document.getElementById("postList");
+  const timelineListEl = document.getElementById("timelineList");
+  const emptyStateEl = document.getElementById("emptyState");
+  const postCountTag = document.getElementById("postCountTag");
 
-      if (currentSearch.trim()) {
-        postCountTag.textContent = `${filtered.length}개의 검색 결과 (전체 ${posts.length}개)`;
-      } else {
-        postCountTag.textContent = hasPosts
-          ? `${posts.length}개의 이야기가 있어요`
-          : "0개의 이야기가 있어요";
-      }
+  const newPostBtn = document.getElementById("newPostBtn");
+  const postForm = document.getElementById("postForm");
+  const titleInput = document.getElementById("titleInput");
+  const dateInput = document.getElementById("dateInput");
+  const contentInput = document.getElementById("contentInput");
+  const imageInput = document.getElementById("imageInput");
+  const todayInfo = document.getElementById("todayInfo");
+  const cancelBtn = document.getElementById("cancelBtn");
 
-      if (!hasPosts) return;
+  const detailTitle = document.getElementById("detailTitle");
+  const detailDate = document.getElementById("detailDate");
+  const detailImageCount = document.getElementById("detailImageCount");
+  const detailContent = document.getElementById("detailContent");
+  const detailImages = document.getElementById("detailImages");
+  const detailCreatedInfo = document.getElementById("detailCreatedInfo");
+  const detailToEditorBtn = document.getElementById("detailToEditorBtn");
 
-      filtered.forEach(post => {
-        const card = document.createElement("article");
-        card.className = "post-card";
+  const backLinks = document.querySelectorAll(".back-link");
 
-        const titleEl = document.createElement("div");
-        titleEl.className = "post-card-title";
-        titleEl.textContent = post.title;
+  const searchInput = document.getElementById("searchInput");
+  const toggleButtons = document.querySelectorAll(".toggle-btn");
 
-        const metaEl = document.createElement("div");
-        metaEl.className = "post-card-meta";
-        const dateSpan = document.createElement("span");
-        dateSpan.textContent = formatDate(post.date || post.createdAt);
-        const imagesSpan = document.createElement("span");
-        imagesSpan.textContent = post.images && post.images.length
+  const imageModal = document.getElementById("imageModal");
+  const imageModalImg = document.getElementById("imageModalImg");
+  const imageModalClose = document.getElementById("imageModalClose");
+
+  // ======== 뷰 전환 ========
+  function showView(name) {
+    [listView, editorView, detailView].forEach((v) =>
+      v.classList.remove("active")
+    );
+    if (name === "list") listView.classList.add("active");
+    if (name === "editor") editorView.classList.add("active");
+    if (name === "detail") detailView.classList.add("active");
+  }
+
+  // ======== 이미지 모달 ========
+  function openImageModal(src) {
+    imageModalImg.src = src;
+    imageModal.classList.add("active");
+  }
+
+  function closeImageModal() {
+    imageModal.classList.remove("active");
+    imageModalImg.src = "";
+  }
+
+  imageModalClose.addEventListener("click", closeImageModal);
+  imageModal.addEventListener("click", (e) => {
+    if (e.target === imageModal) {
+      closeImageModal();
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && imageModal.classList.contains("active")) {
+      closeImageModal();
+    }
+  });
+
+  // ======== 게시판 렌더링 (카드 뷰) ========
+  function renderList() {
+    const filtered = getFilteredPosts();
+    postListEl.innerHTML = "";
+    const hasPosts = filtered.length > 0;
+    emptyStateEl.style.display = hasPosts ? "none" : "block";
+
+    if (currentSearch.trim()) {
+      postCountTag.textContent = `${filtered.length}개의 검색 결과 (전체 ${posts.length}개)`;
+    } else {
+      postCountTag.textContent = hasPosts
+        ? `${posts.length}개의 이야기가 있어요`
+        : "0개의 이야기가 있어요";
+    }
+
+    if (!hasPosts) return;
+
+    filtered.forEach((post) => {
+      const card = document.createElement("article");
+      card.className = "post-card";
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "post-card-title";
+      titleEl.textContent = post.title;
+
+      const metaEl = document.createElement("div");
+      metaEl.className = "post-card-meta";
+      const dateSpan = document.createElement("span");
+      dateSpan.textContent = formatDate(post.date || post.createdAt);
+      const imagesSpan = document.createElement("span");
+      imagesSpan.textContent =
+        post.images && post.images.length
           ? `📷 ${post.images.length}장`
           : "텍스트 기록";
-        metaEl.appendChild(dateSpan);
-        metaEl.appendChild(imagesSpan);
+      metaEl.appendChild(dateSpan);
+      metaEl.appendChild(imagesSpan);
 
-        const snippetEl = document.createElement("div");
-        snippetEl.className = "post-card-snippet";
-        snippetEl.textContent = post.content.length > 80
+      const snippetEl = document.createElement("div");
+      snippetEl.className = "post-card-snippet";
+      snippetEl.textContent =
+        post.content.length > 80
           ? post.content.slice(0, 80) + "..."
           : post.content;
 
-        card.appendChild(titleEl);
-        card.appendChild(metaEl);
-        card.appendChild(snippetEl);
+      card.appendChild(titleEl);
+      card.appendChild(metaEl);
+      card.appendChild(snippetEl);
 
-        if (post.images && post.images.length > 0) {
-          const strip = document.createElement("div");
-          strip.className = "thumb-strip";
+      if (post.images && post.images.length > 0) {
+        const strip = document.createElement("div");
+        strip.className = "thumb-strip";
 
-          post.images.slice(0, 3).forEach(src => {
-            const img = document.createElement("img");
-            img.src = src;
-            strip.appendChild(img);
-          });
+        post.images.slice(0, 3).forEach((src) => {
+          const img = document.createElement("img");
+          img.src = src;
+          strip.appendChild(img);
+        });
 
-          if (post.images.length > 3) {
-            const badge = document.createElement("div");
-            badge.className = "thumb-count-badge";
-            badge.textContent = `+${post.images.length - 3}`;
-            strip.appendChild(badge);
-          }
-
-          card.appendChild(strip);
+        if (post.images.length > 3) {
+          const badge = document.createElement("div");
+          badge.className = "thumb-count-badge";
+          badge.textContent = `+${post.images.length - 3}`;
+          strip.appendChild(badge);
         }
 
-        // 수정 / 삭제 버튼
-        const actions = document.createElement("div");
-        actions.className = "card-actions";
+        card.appendChild(strip);
+      }
 
-        const editBtn = document.createElement("button");
-        editBtn.className = "mini-btn";
-        editBtn.textContent = "수정";
-        editBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          startEdit(post);
-        });
+      // 수정 / 삭제 버튼
+      const actions = document.createElement("div");
+      actions.className = "card-actions";
 
-        const deleteBtn = document.createElement("button");
-        deleteBtn.className = "mini-btn delete";
-        deleteBtn.textContent = "삭제";
-        deleteBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (confirm("정말 이 글을 삭제할까요?")) {
-            posts = posts.filter(p => p.id !== post.id);
-            savePosts();
-            renderList();
-            renderTimeline();
-          }
-        });
-
-        actions.appendChild(editBtn);
-        actions.appendChild(deleteBtn);
-        card.appendChild(actions);
-
-        card.addEventListener("click", () => openDetail(post.id));
-        postListEl.appendChild(card);
-      });
-    }
-
-    // ======== 연도별 타임라인 렌더링 ========
-    function renderTimeline() {
-      const filtered = getFilteredPosts();
-      timelineListEl.innerHTML = "";
-      const hasPosts = filtered.length > 0;
-      emptyStateEl.style.display = hasPosts ? "none" : "block";
-
-      if (!hasPosts) return;
-
-      const byYear = {};
-      filtered.forEach(post => {
-        const d = new Date(post.date || post.createdAt);
-        const year = d.getFullYear();
-        if (!byYear[year]) byYear[year] = [];
-        byYear[year].push(post);
+      const editBtn = document.createElement("button");
+      editBtn.className = "mini-btn";
+      editBtn.textContent = "수정";
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        startEdit(post);
       });
 
-      const years = Object.keys(byYear)
-        .map(y => parseInt(y, 10))
-        .sort((a, b) => b - a);
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "mini-btn delete";
+      deleteBtn.textContent = "삭제";
+      deleteBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (confirm("정말 이 글을 삭제할까요?")) {
+          await deleteDoc(doc(db, "posts", post.id));
+          await fetchPosts();
+          renderList();
+          renderTimeline();
+        }
+      });
 
-      years.forEach(year => {
-        const block = document.createElement("div");
-        block.className = "timeline-year-block";
+      actions.appendChild(editBtn);
+      actions.appendChild(deleteBtn);
+      card.appendChild(actions);
 
-        const label = document.createElement("div");
-        label.className = "timeline-year-label";
-        label.textContent = `${year}`;
+      card.addEventListener("click", () => openDetail(post.id));
+      postListEl.appendChild(card);
+    });
+  }
 
-        const itemsWrap = document.createElement("div");
-        itemsWrap.className = "timeline-items";
+  // ======== 연도별 타임라인 렌더링 ========
+  function renderTimeline() {
+    const filtered = getFilteredPosts();
+    timelineListEl.innerHTML = "";
+    const hasPosts = filtered.length > 0;
+    emptyStateEl.style.display = hasPosts ? "none" : "block";
 
-        const postsOfYear = byYear[year].sort(
-          (a, b) => (b.date || b.createdAt) - (a.date || a.createdAt)
-        );
+    if (!hasPosts) return;
 
-        postsOfYear.forEach(post => {
-          const item = document.createElement("div");
-          item.className = "timeline-item";
+    const byYear = {};
+    filtered.forEach((post) => {
+      const d = new Date(post.date || post.createdAt);
+      const year = d.getFullYear();
+      if (!byYear[year]) byYear[year] = [];
+      byYear[year].push(post);
+    });
 
-          const dateEl = document.createElement("div");
-          dateEl.className = "timeline-item-date";
-          dateEl.textContent = formatDate(post.date || post.createdAt);
+    const years = Object.keys(byYear)
+      .map((y) => parseInt(y, 10))
+      .sort((a, b) => b - a);
 
-          const titleEl = document.createElement("div");
-          titleEl.className = "timeline-item-title";
-          titleEl.textContent = post.title;
+    years.forEach((year) => {
+      const block = document.createElement("div");
+      block.className = "timeline-year-block";
 
-          const snippetEl = document.createElement("div");
-          snippetEl.className = "timeline-item-snippet";
-          snippetEl.textContent = post.content.length > 60
+      const label = document.createElement("div");
+      label.className = "timeline-year-label";
+      label.textContent = `${year}`;
+
+      const itemsWrap = document.createElement("div");
+      itemsWrap.className = "timeline-items";
+
+      const postsOfYear = byYear[year].sort(
+        (a, b) => (b.date || b.createdAt) - (a.date || a.createdAt)
+      );
+
+      postsOfYear.forEach((post) => {
+        const item = document.createElement("div");
+        item.className = "timeline-item";
+
+        const dateEl = document.createElement("div");
+        dateEl.className = "timeline-item-date";
+        dateEl.textContent = formatDate(post.date || post.createdAt);
+
+        const titleEl = document.createElement("div");
+        titleEl.className = "timeline-item-title";
+        titleEl.textContent = post.title;
+
+        const snippetEl = document.createElement("div");
+        snippetEl.className = "timeline-item-snippet";
+        snippetEl.textContent =
+          post.content.length > 60
             ? post.content.slice(0, 60) + "..."
             : post.content;
 
-          item.appendChild(dateEl);
-          item.appendChild(titleEl);
-          item.appendChild(snippetEl);
+        item.appendChild(dateEl);
+        item.appendChild(titleEl);
+        item.appendChild(snippetEl);
 
-          item.addEventListener("click", () => openDetail(post.id));
-          itemsWrap.appendChild(item);
-        });
-
-        block.appendChild(label);
-        block.appendChild(itemsWrap);
-        timelineListEl.appendChild(block);
+        item.addEventListener("click", () => openDetail(post.id));
+        itemsWrap.appendChild(item);
       });
+
+      block.appendChild(label);
+      block.appendChild(itemsWrap);
+      timelineListEl.appendChild(block);
+    });
+  }
+
+  // ======== 상세 보기 ========
+  function openDetail(id) {
+    const post = posts.find((p) => p.id === id);
+    if (!post) return;
+
+    detailTitle.textContent = post.title;
+    detailDate.textContent = `작성일 · ${formatDate(
+      post.date || post.createdAt
+    )}`;
+    const created = new Date(post.createdAt);
+    detailCreatedInfo.textContent = `저장 시각: ${formatDate(
+      created
+    )} ${created.toTimeString().slice(0, 5)}`;
+
+    detailContent.innerHTML = escapeHtml(post.content).replace(
+      /\n/g,
+      "<br />"
+    );
+
+    detailImages.innerHTML = "";
+    if (post.images && post.images.length > 0) {
+      detailImageCount.textContent = `사진 ${post.images.length}장`;
+      post.images.forEach((src) => {
+        const img = document.createElement("img");
+        img.src = src;
+        img.addEventListener("click", () => openImageModal(src));
+        detailImages.appendChild(img);
+      });
+    } else {
+      detailImageCount.textContent = "사진 없음";
     }
 
-    // ======== 상세 보기 ========
-    function openDetail(id) {
-      const post = posts.find(p => p.id === id);
-      if (!post) return;
-
-      detailTitle.textContent = post.title;
-      detailDate.textContent = `작성일 · ${formatDate(post.date || post.createdAt)}`;
-      const created = new Date(post.createdAt);
-      detailCreatedInfo.textContent = `저장 시각: ${formatDate(created)} ${created.toTimeString().slice(0, 5)}`;
-
-      detailContent.innerHTML = escapeHtml(post.content).replace(/\n/g, "<br />");
-
-      detailImages.innerHTML = "";
-      if (post.images && post.images.length > 0) {
-        detailImageCount.textContent = `사진 ${post.images.length}장`;
-        post.images.forEach(src => {
-          const img = document.createElement("img");
-          img.src = src;
-          img.addEventListener("click", () => openImageModal(src));
-          detailImages.appendChild(img);
-        });
-      } else {
-        detailImageCount.textContent = "사진 없음";
-      }
-
-      detailToEditorBtn.onclick = () => {
-        editingPostId = null; // 비슷한 새 글
-        titleInput.value = `[비슷한 기록] ${post.title}`;
-        contentInput.value = "";
-        imageInput.value = "";
-        dateInput.value = todayInputValue();
-        todayInfo.textContent = getTodayLabel();
-        showView("editor");
-      };
-
-      showView("detail");
-    }
-
-    // ======== 수정 모드 시작 ========
-    function startEdit(post) {
-      editingPostId = post.id;
-      titleInput.value = post.title;
-      contentInput.value = post.content;
+    detailToEditorBtn.onclick = () => {
+      editingPostId = null; // 비슷한 새 글
+      titleInput.value = `[비슷한 기록] ${post.title}`;
+      contentInput.value = "";
       imageInput.value = "";
-      const d = post.date || post.createdAt || Date.now();
-      dateInput.value = dateToInputValue(d);
-      todayInfo.textContent = "이 글을 수정하는 중이야 ✏️";
-      showView("editor");
-    }
-
-    // ======== 새 글 / 수정 처리 ========
-    newPostBtn.addEventListener("click", () => {
-      editingPostId = null;
-      postForm.reset();
       dateInput.value = todayInputValue();
       todayInfo.textContent = getTodayLabel();
       showView("editor");
-      titleInput.focus();
-    });
+    };
 
-    cancelBtn.addEventListener("click", () => {
-      editingPostId = null;
-      postForm.reset();
-      showView("list");
-    });
+    showView("detail");
+  }
 
-    // 뒤로가기 링크들
-    backLinks.forEach(link => {
-      link.addEventListener("click", () => {
-        editingPostId = null;
-        showView(link.dataset.back || "list");
-      });
-    });
+  // ======== 수정 모드 시작 ========
+  function startEdit(post) {
+    editingPostId = post.id;
+    titleInput.value = post.title;
+    contentInput.value = post.content;
+    imageInput.value = "";
+    const d = post.date || post.createdAt || Date.now();
+    dateInput.value = dateToInputValue(d);
+    todayInfo.textContent = "이 글을 수정하는 중이야 ✏️";
+    showView("editor");
+  }
 
-    // 이미지 파일들을 DataURL 배열로 변환
-    function readImages(files) {
-      const arr = Array.from(files || []);
-      if (arr.length === 0) return Promise.resolve([]);
+  // ======== 이미지 Firebase Storage 업로드 ========
+  async function uploadImages(files) {
+    const arr = Array.from(files || []);
+    if (arr.length === 0) return [];
+    const urls = [];
 
-      return Promise.all(
-        arr.map(file => {
-          return new Promise(resolve => {
-            const reader = new FileReader();
-            reader.onload = e => resolve(e.target.result);
-            reader.readAsDataURL(file);
-          });
-        })
+    for (const file of arr) {
+      const storageRef = ref(
+        storage,
+        `diaryImages/${Date.now()}_${file.name}`
       );
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      urls.push(url);
     }
+    return urls;
+  }
 
-    postForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
+  // ======== 새 글 / 수정 처리 ========
+  newPostBtn.addEventListener("click", () => {
+    editingPostId = null;
+    postForm.reset();
+    dateInput.value = todayInputValue();
+    todayInfo.textContent = getTodayLabel();
+    showView("editor");
+    titleInput.focus();
+  });
 
-      const title = titleInput.value.trim();
-      const content = contentInput.value.trim();
-      const dateValue = dateInput.value;
+  cancelBtn.addEventListener("click", () => {
+    editingPostId = null;
+    postForm.reset();
+    showView("list");
+  });
 
-      if (!title || !content || !dateValue) {
-        alert("제목, 날짜, 내용을 모두 입력해줘!");
-        return;
-      }
-
-      const selectedDate = new Date(dateValue + "T00:00:00");
-      const dateMs = selectedDate.getTime();
-      const files = imageInput.files;
-      const imageDataUrls = await readImages(files);
-      const now = Date.now();
-
-      if (editingPostId !== null) {
-        // 수정 모드
-        const idx = posts.findIndex(p => p.id === editingPostId);
-        if (idx !== -1) {
-          const target = posts[idx];
-          target.title = title;
-          target.content = content;
-          target.date = dateMs;
-          // 새 사진 선택했으면 교체, 아니면 기존 유지
-          if (imageDataUrls.length > 0) {
-            target.images = imageDataUrls;
-          }
-          posts[idx] = target;
-          savePosts();
-        }
-      } else {
-        // 새 글 모드
-        const newPost = {
-          id: now,
-          title,
-          content,
-          images: imageDataUrls,
-          createdAt: now,
-          date: dateMs
-        };
-        posts.unshift(newPost);
-        savePosts();
-      }
-
+  // 뒤로가기 링크들
+  backLinks.forEach((link) => {
+    link.addEventListener("click", () => {
       editingPostId = null;
-      renderList();
-      renderTimeline();
-
-      postForm.reset();
-      showView("list");
+      showView(link.dataset.back || "list");
     });
+  });
 
-    // ======== 검색 기능 ========
-    searchInput.addEventListener("input", () => {
-      currentSearch = searchInput.value;
-      renderList();
-      renderTimeline();
-      updateListModeVisibility();
-    });
+  postForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
 
-    // ======== 뷰 토글 (카드 / 타임라인) ========
-    toggleButtons.forEach(btn => {
-      btn.addEventListener("click", () => {
-        const mode = btn.dataset.mode;
-        if (!mode || mode === currentListMode) return;
-        currentListMode = mode;
+    const title = titleInput.value.trim();
+    const content = contentInput.value.trim();
+    const dateValue = dateInput.value;
 
-        toggleButtons.forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
+    if (!title || !content || !dateValue) {
+      alert("제목, 날짜, 내용을 모두 입력해줘!");
+      return;
+    }
 
-        updateListModeVisibility();
+    const selectedDate = new Date(dateValue + "T00:00:00");
+    const dateMs = selectedDate.getTime();
+    const files = imageInput.files;
+    const now = Date.now();
+
+    let imageUrls = [];
+    if (files && files.length > 0) {
+      imageUrls = await uploadImages(files);
+    } else if (editingPostId) {
+      const existing = posts.find((p) => p.id === editingPostId);
+      imageUrls = existing ? existing.images || [] : [];
+    }
+
+    if (editingPostId !== null) {
+      // 수정 모드
+      const docRef = doc(db, "posts", editingPostId);
+      await updateDoc(docRef, {
+        title,
+        content,
+        date: dateMs,
+        images: imageUrls,
       });
-    });
-
-    function updateListModeVisibility() {
-      if (currentListMode === "grid") {
-        postListEl.style.display = "grid";
-        timelineListEl.style.display = "none";
-      } else {
-        postListEl.style.display = "none";
-        timelineListEl.style.display = "block";
-      }
-
-      const filtered = getFilteredPosts();
-      const hasPosts = filtered.length > 0;
-      emptyStateEl.style.display = hasPosts ? "none" : "block";
+    } else {
+      // 새 글 모드
+      await addDoc(postsCollection, {
+        title,
+        content,
+        images: imageUrls,
+        createdAt: now,
+        date: dateMs,
+      });
     }
 
-    // ======== 초기화 ========
-    function init() {
-      posts = loadPosts();
-      renderList();
-      renderTimeline();
-      todayInfo.textContent = getTodayLabel();
-      dateInput.value = todayInputValue();
+    editingPostId = null;
+    postForm.reset();
+
+    await fetchPosts();
+    renderList();
+    renderTimeline();
+    showView("list");
+  });
+
+  // ======== 검색 기능 ========
+  searchInput.addEventListener("input", () => {
+    currentSearch = searchInput.value;
+    renderList();
+    renderTimeline();
+    updateListModeVisibility();
+  });
+
+  // ======== 뷰 토글 (카드 / 타임라인) ========
+  toggleButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.mode;
+      if (!mode || mode === currentListMode) return;
+      currentListMode = mode;
+
+      toggleButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+
       updateListModeVisibility();
-      updateDDayBox();
+    });
+  });
+
+  function updateListModeVisibility() {
+    if (currentListMode === "grid") {
+      postListEl.style.display = "grid";
+      timelineListEl.style.display = "none";
+    } else {
+      postListEl.style.display = "none";
+      timelineListEl.style.display = "block";
     }
 
-    init();
-  </script>
+    const filtered = getFilteredPosts();
+    const hasPosts = filtered.length > 0;
+    emptyStateEl.style.display = hasPosts ? "none" : "block";
+  }
+
+  // ======== 초기화 ========
+  async function init() {
+    await fetchPosts();
+    renderList();
+    renderTimeline();
+    todayInfo.textContent = getTodayLabel();
+    dateInput.value = todayInputValue();
+    updateListModeVisibility();
+    updateDDayBox();
+  }
+
+  init();
+</script>
+
 </body>
 </html>
