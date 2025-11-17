@@ -754,6 +754,29 @@
                 <span>저장하기</span>
               </button>
             </div>
+<script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-analytics.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
+
+  // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyCIB1-zIklod2dcTJUyYj4pqSfDBnU31oE",
+    authDomain: "couple-diary-830cc.firebaseapp.com",
+    projectId: "couple-diary-830cc",
+    storageBucket: "couple-diary-830cc.firebasestorage.app",
+    messagingSenderId: "989294208046",
+    appId: "1:989294208046:web:324f854737d55b5813abbf",
+    measurementId: "G-JQJZBB04RX"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+</script>
           </div>
         </form>
       </section>
